@@ -4,6 +4,9 @@ import { OrbitControls, Grid } from '@react-three/drei'
 import * as THREE from 'three'
 import useBuildingStore from '../../store/buildingStore'
 
+/** Slab extrude settings — constant depth 0.2 m */
+const SLAB_EXTRUDE = { depth: 0.2, bevelEnabled: false }
+
 /**
  * Build a THREE.Shape from an array of {x, y} points.
  * The points are in floor-plan meter coords; we center them on the building.
@@ -77,16 +80,18 @@ function FloorMesh({ floorIndex, building, wallOpacity }) {
             <meshStandardMaterial {...matProps} />
           </mesh>
         </group>
-        {/* Floor slab */}
-        <mesh position={[0, floorY, 0]} renderOrder={0}>
-          <boxGeometry args={[building.width + 0.2, 0.2, building.depth + 0.2]} />
-          <meshStandardMaterial
-            color="#a89880"
-            transparent={transparent}
-            opacity={Math.min(wallOpacity + 0.1, 1)}
-            depthWrite={!transparent}
-          />
-        </mesh>
+        {/* Floor slab — flat extrusion of the same outline shape, centered at floorY */}
+        <group position={[0, floorY - 0.1, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <mesh renderOrder={0}>
+            <extrudeGeometry args={[shape, SLAB_EXTRUDE]} />
+            <meshStandardMaterial
+              color="#a89880"
+              transparent={transparent}
+              opacity={Math.min(wallOpacity + 0.1, 1)}
+              depthWrite={!transparent}
+            />
+          </mesh>
+        </group>
       </group>
     )
   }
