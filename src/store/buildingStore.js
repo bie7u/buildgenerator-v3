@@ -7,6 +7,7 @@ const useBuildingStore = create((set) => ({
     floorHeight: 3,
     width: 20,
     depth: 10,
+    outline: [], // [{x, y}] polygon points in meters (floor plan coords), empty = use rectangle
   },
   elements: [],
   selectedElementId: null,
@@ -14,6 +15,7 @@ const useBuildingStore = create((set) => ({
   viewMode: '2d',
   wizardOpen: false,
   wizardStep: 0,
+  wallOpacity: 0.85,
 
   updateBuilding: (updates) => set((state) => ({ building: { ...state.building, ...updates } })),
   addElement: (element) =>
@@ -31,6 +33,9 @@ const useBuildingStore = create((set) => ({
   setViewMode: (mode) => set({ viewMode: mode }),
   setWizardOpen: (open) => set({ wizardOpen: open }),
   setWizardStep: (step) => set({ wizardStep: step }),
+  setWallOpacity: (opacity) => set({ wallOpacity: opacity }),
+  setOutline: (points) => set((state) => ({ building: { ...state.building, outline: points } })),
+  clearOutline: () => set((state) => ({ building: { ...state.building, outline: [] } })),
 }))
 
 export default useBuildingStore

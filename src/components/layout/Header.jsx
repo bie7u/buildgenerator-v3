@@ -2,7 +2,15 @@ import React from 'react'
 import useBuildingStore from '../../store/buildingStore'
 
 export default function Header() {
-  const { building, viewMode, setViewMode, setWizardOpen } = useBuildingStore()
+  const { building, viewMode, setViewMode, setWizardOpen, setActiveTool } = useBuildingStore()
+
+  const switchView = (mode) => {
+    setViewMode(mode)
+    // leave draw-outline only in plan mode; otherwise switch to select
+    if (mode !== 'plan') {
+      setActiveTool('select')
+    }
+  }
 
   return (
     <header className="bg-slate-800 text-white h-14 flex items-center justify-between px-6 shadow-lg z-10">
@@ -20,7 +28,7 @@ export default function Header() {
         </button>
         <div className="flex rounded overflow-hidden border border-slate-600">
           <button
-            onClick={() => setViewMode('2d')}
+            onClick={() => switchView('2d')}
             className={`px-4 py-1.5 text-sm font-medium transition-colors ${
               viewMode === '2d' ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
             }`}
@@ -28,7 +36,16 @@ export default function Header() {
             2D
           </button>
           <button
-            onClick={() => setViewMode('3d')}
+            onClick={() => switchView('plan')}
+            title="Rzut poziomy – rysuj obrys budynku"
+            className={`px-4 py-1.5 text-sm font-medium transition-colors ${
+              viewMode === 'plan' ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+            }`}
+          >
+            Rzut
+          </button>
+          <button
+            onClick={() => switchView('3d')}
             className={`px-4 py-1.5 text-sm font-medium transition-colors ${
               viewMode === '3d' ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
             }`}
