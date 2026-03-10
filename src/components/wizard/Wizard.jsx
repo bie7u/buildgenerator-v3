@@ -51,7 +51,9 @@ export default function Wizard() {
       addElement({ type: 'staircase', floor: 0, x: 1, y: 0, width: 3, height: 4, depth: 3, properties: { steps: 18, hasLanding: true } })
     }
     if (addElevator) {
-      addElement({ type: 'elevator', floor: 0, x: 5, y: 0, width: 1.5, height: 2.8, depth: 1.5, properties: { capacity: 8 } })
+      const elevWidth = 1.5
+      const elevX = Math.min(5, Math.max(0, building.width - elevWidth))
+      addElement({ type: 'elevator', floor: 0, x: elevX, y: 0, width: elevWidth, height: 2.8, depth: elevWidth, properties: { capacity: 8 } })
     }
     if (addWindows) {
       for (let f = 0; f < building.floors; f++) {

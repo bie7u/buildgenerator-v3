@@ -1,3 +1,4 @@
+/** Number of pixels per meter used to convert between real-world meters and canvas pixel coordinates in the 2D floor plan editor. */
 export const SCALE = 20 // pixels per meter
 
 export const metersToPx = (m) => m * SCALE

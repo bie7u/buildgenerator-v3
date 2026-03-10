@@ -51,6 +51,9 @@ export default function BuildingCanvas() {
     const xMeters = (pos.x - PADDING_LEFT) / SCALE
     const defaults = ELEMENT_DEFAULTS[type]
 
+    // Only add element if it can fit within the building width
+    if (defaults.width > building.width) return
+
     addElement({
       type,
       floor,
