@@ -4,99 +4,116 @@ import { OrbitControls, Grid } from '@react-three/drei'
 import * as THREE from 'three'
 import useBuildingStore from '../../store/buildingStore'
 
-// ─── Building floors using rectangle (default) ───────────────────────────────
-function BuildingMeshRect({ building, wallOpacity }) {
-  const transparent = wallOpacity < 0.99
-  const floors = []
-  for (let i = 0; i < building.floors; i++) {
-    const y = i * building.floorHeight + (building.floorHeight - 0.1) / 2
-    floors.push(
-      <mesh key={`f${i}`} position={[0, y, 0]} castShadow receiveShadow renderOrder={0}>
-        <boxGeometry args={[building.width, building.floorHeight - 0.1, building.depth]} />
-        <meshStandardMaterial
-          color={i % 2 === 0 ? '#d4c5a9' : '#cbb99a'}
-          transparent={transparent}
-          opacity={wallOpacity}
-          side={THREE.DoubleSide}
-          depthWrite={!transparent}
-          renderOrder={0}
-        />
-      </mesh>
-    )
-    floors.push(
-      <mesh key={`slab${i}`} position={[0, i * building.floorHeight, 0]} renderOrder={0}>
-        <boxGeometry args={[building.width + 0.2, 0.2, building.depth + 0.2]} />
-        <meshStandardMaterial
-          color="#a89880"
-          transparent={transparent}
-          opacity={Math.min(wallOpacity + 0.1, 1)}
-          depthWrite={!transparent}
-          renderOrder={0}
-        />
-      </mesh>
-    )
-  }
-  return <>{floors}</>
+/**
+ * Build a THREE.Shape from an array of {x, y} points.
+ * The points are in floor-plan meter coords; we center them on the building.
+ */
+function buildShape(outline, buildingWidth, buildingDepth) {
+  if (!outline || outline.length < 3) return null
+  const s = new THREE.Shape()
+  outline.forEach(({ x, y }, i) => {
+    const cx = x - buildingWidth / 2
+    const cy = y - buildingDepth / 2
+    if (i === 0) s.moveTo(cx, cy)
+    else s.lineTo(cx, cy)
+  })
+  s.closePath()
+  return s
 }
 
-// ─── Building floors using polygon outline (custom shape) ────────────────────
-function BuildingMeshOutline({ building, wallOpacity }) {
-  const outline = building.outline
+/**
+ * Resolve which outline applies to a given floor index.
+ * Priority: per-floor → global base → null (= use rectangle)
+ */
+function resolveOutline(floorIndex, building) {
+  const fo = building.floorOutlines?.[floorIndex]
+  if (fo && fo.length >= 3) return fo
+  if (building.outline && building.outline.length >= 3) return building.outline
+  return null
+}
+
+// ─── Single floor mesh — uses extruded shape or box ──────────────────────────
+function FloorMesh({ floorIndex, building, wallOpacity }) {
   const transparent = wallOpacity < 0.99
+  const color = floorIndex % 2 === 0 ? '#d4c5a9' : '#cbb99a'
+  const floorY = floorIndex * building.floorHeight
+  const outline = resolveOutline(floorIndex, building)
 
-  const shape = useMemo(() => {
-    if (!outline || outline.length < 3) return null
-    const s = new THREE.Shape()
-    outline.forEach(({ x, y }, i) => {
-      const cx = x - building.width / 2
-      const cy = y - building.depth / 2
-      if (i === 0) s.moveTo(cx, cy)
-      else s.lineTo(cx, cy)
-    })
-    s.closePath()
-    return s
-  }, [outline, building.width, building.depth])
+  // Build a stable string key for memoizing the shape — more efficient than full stringify
+  const outlineKey = outline
+    ? outline.map((p) => `${p.x},${p.y}`).join('|')
+    : ''
 
-  if (!shape) return null
+  const shape = useMemo(
+    () => buildShape(outline, building.width, building.depth),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [outlineKey, building.width, building.depth]
+  )
 
-  const floors = []
-  for (let i = 0; i < building.floors; i++) {
-    const floorY = i * building.floorHeight
-    const extrudeSettings = { depth: building.floorHeight - 0.1, bevelEnabled: false }
+  const extrudeSettings = useMemo(
+    () => ({ depth: building.floorHeight - 0.1, bevelEnabled: false }),
+    [building.floorHeight]
+  )
 
-    floors.push(
-      // Rotate -PI/2 around x so the shape (x-y plane) extrudes upward (world y-axis).
-      // Position is [0, floorY, 0] — the extrusion itself provides the vertical extent
-      // from floorY to floorY+(floorHeight-0.1), unlike BoxGeometry which needs center offset.
-      <group key={`f${i}`} position={[0, floorY, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <mesh castShadow receiveShadow renderOrder={0}>
-          <extrudeGeometry args={[shape, extrudeSettings]} />
+  const matProps = {
+    color,
+    transparent,
+    opacity: wallOpacity,
+    side: THREE.DoubleSide,
+    depthWrite: !transparent,
+  }
+
+  if (shape) {
+    return (
+      <group renderOrder={0}>
+        {/* Extruded floor walls */}
+        <group
+          position={[0, floorY, 0]}
+          // Rotate -PI/2 around X: shape XY plane → world XZ, extrusion goes up (world Y)
+          rotation={[-Math.PI / 2, 0, 0]}
+        >
+          <mesh castShadow receiveShadow renderOrder={0}>
+            <extrudeGeometry args={[shape, extrudeSettings]} />
+            <meshStandardMaterial {...matProps} />
+          </mesh>
+        </group>
+        {/* Floor slab */}
+        <mesh position={[0, floorY, 0]} renderOrder={0}>
+          <boxGeometry args={[building.width + 0.2, 0.2, building.depth + 0.2]} />
           <meshStandardMaterial
-            color={i % 2 === 0 ? '#d4c5a9' : '#cbb99a'}
+            color="#a89880"
             transparent={transparent}
-            opacity={wallOpacity}
-            side={THREE.DoubleSide}
+            opacity={Math.min(wallOpacity + 0.1, 1)}
             depthWrite={!transparent}
-            renderOrder={0}
           />
         </mesh>
       </group>
     )
-    // Flat slab (keep as box for simplicity)
-    floors.push(
-      <mesh key={`slab${i}`} position={[0, floorY, 0]} renderOrder={0}>
+  }
+
+  // Fallback: default rectangle
+  return (
+    <group renderOrder={0}>
+      <mesh
+        position={[0, floorY + (building.floorHeight - 0.1) / 2, 0]}
+        castShadow
+        receiveShadow
+        renderOrder={0}
+      >
+        <boxGeometry args={[building.width, building.floorHeight - 0.1, building.depth]} />
+        <meshStandardMaterial {...matProps} />
+      </mesh>
+      <mesh position={[0, floorY, 0]} renderOrder={0}>
         <boxGeometry args={[building.width + 0.2, 0.2, building.depth + 0.2]} />
         <meshStandardMaterial
           color="#a89880"
           transparent={transparent}
           opacity={Math.min(wallOpacity + 0.1, 1)}
           depthWrite={!transparent}
-          renderOrder={0}
         />
       </mesh>
-    )
-  }
-  return <>{floors}</>
+    </group>
+  )
 }
 
 // ─── Interior elements (stairs, elevator, etc.) ──────────────────────────────
@@ -112,7 +129,6 @@ function ElementMeshes({ elements, building }) {
 
         switch (el.type) {
           case 'staircase': {
-            // Draw stair steps instead of a plain box
             const sw = el.width || 3
             const sd = el.depth || 3
             const steps = el.properties?.steps || 12
@@ -130,11 +146,7 @@ function ElementMeshes({ elements, building }) {
                     <meshStandardMaterial color="#f97316" />
                   </mesh>
                 ))}
-                {/* Landing platform at top */}
-                <mesh
-                  position={[xOffset, baseY + building.floorHeight - 0.05, 0]}
-                  renderOrder={1}
-                >
+                <mesh position={[xOffset, baseY + building.floorHeight - 0.05, 0]} renderOrder={1}>
                   <boxGeometry args={[sw, 0.1, sd]} />
                   <meshStandardMaterial color="#ea580c" />
                 </mesh>
@@ -147,17 +159,14 @@ function ElementMeshes({ elements, building }) {
             const ed = el.depth || 1.5
             return (
               <group key={el.id} renderOrder={1}>
-                {/* Elevator shaft (transparent walls) */}
                 <mesh position={[xOffset, baseY + eh / 2, 0]} renderOrder={1}>
                   <boxGeometry args={[ew, eh, ed]} />
                   <meshStandardMaterial color="#1d4ed8" transparent opacity={0.35} side={THREE.DoubleSide} depthWrite={false} />
                 </mesh>
-                {/* Elevator cabin */}
                 <mesh position={[xOffset, baseY + eh * 0.3, 0]} renderOrder={2}>
                   <boxGeometry args={[ew * 0.8, eh * 0.4, ed * 0.8]} />
                   <meshStandardMaterial color="#3b82f6" />
                 </mesh>
-                {/* Doors */}
                 <mesh position={[xOffset, baseY + eh * 0.3, ed / 2 + 0.01]} renderOrder={2}>
                   <boxGeometry args={[ew * 0.6, eh * 0.35, 0.04]} />
                   <meshStandardMaterial color="#93c5fd" />
@@ -217,12 +226,16 @@ function ElementMeshes({ elements, building }) {
 export default function BuildingViewer3D() {
   const { building, elements, wallOpacity, setWallOpacity } = useBuildingStore()
   const totalHeight = building.floors * building.floorHeight
-  const hasOutline = building.outline && building.outline.length >= 3
+
+  // Count how many floors have a custom per-floor outline
+  const floorOutlines = building.floorOutlines || {}
+  const customFloorCount = Object.values(floorOutlines).filter((o) => o?.length >= 3).length
+  const hasGlobalOutline = building.outline?.length >= 3
 
   return (
     <div className="flex-1 bg-slate-950 relative">
-      {/* ── Transparency control overlay ── */}
-      <div className="absolute top-4 left-4 z-10 bg-slate-800/90 backdrop-blur-sm rounded-xl p-3 shadow-xl border border-slate-700 min-w-[180px]">
+      {/* ── Transparency + info overlay ── */}
+      <div className="absolute top-4 left-4 z-10 bg-slate-800/90 backdrop-blur-sm rounded-xl p-3 shadow-xl border border-slate-700 min-w-[190px]">
         <div className="text-xs text-slate-400 mb-2 font-medium">Przezroczystość ścian</div>
         <div className="flex items-center gap-3">
           <input
@@ -244,10 +257,16 @@ export default function BuildingViewer3D() {
             <span>Widok wnętrza aktywny</span>
           </div>
         )}
-        {hasOutline && (
+        {customFloorCount > 0 && (
           <div className="text-xs text-green-400 mt-1.5 flex items-center gap-1">
             <span>✓</span>
-            <span>Obrys niestandardowy</span>
+            <span>{customFloorCount} kondygnacji z własnym obrysem</span>
+          </div>
+        )}
+        {hasGlobalOutline && customFloorCount === 0 && (
+          <div className="text-xs text-green-400 mt-1.5 flex items-center gap-1">
+            <span>✓</span>
+            <span>Obrys globalny aktywny</span>
           </div>
         )}
       </div>
@@ -262,11 +281,15 @@ export default function BuildingViewer3D() {
           <directionalLight position={[-10, 10, -10]} intensity={0.35} />
           <directionalLight position={[0, -5, 5]} intensity={0.15} />
 
-          {hasOutline ? (
-            <BuildingMeshOutline building={building} wallOpacity={wallOpacity} />
-          ) : (
-            <BuildingMeshRect building={building} wallOpacity={wallOpacity} />
-          )}
+          {/* Render each floor with its own resolved outline */}
+          {Array.from({ length: building.floors }, (_, i) => (
+            <FloorMesh
+              key={i}
+              floorIndex={i}
+              building={building}
+              wallOpacity={wallOpacity}
+            />
+          ))}
 
           <ElementMeshes elements={elements} building={building} />
 

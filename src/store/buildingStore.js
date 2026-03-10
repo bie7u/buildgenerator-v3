@@ -7,7 +7,8 @@ const useBuildingStore = create((set) => ({
     floorHeight: 3,
     width: 20,
     depth: 10,
-    outline: [], // [{x, y}] polygon points in meters (floor plan coords), empty = use rectangle
+    outline: [], // global base outline [{x, y}], empty = use rectangle
+    floorOutlines: {}, // per-floor overrides: { [floorIndex]: [{x, y}] }
   },
   elements: [],
   selectedElementId: null,
@@ -16,6 +17,7 @@ const useBuildingStore = create((set) => ({
   wizardOpen: false,
   wizardStep: 0,
   wallOpacity: 0.85,
+  selectedFloor: 0,
 
   updateBuilding: (updates) => set((state) => ({ building: { ...state.building, ...updates } })),
   addElement: (element) =>
@@ -34,8 +36,25 @@ const useBuildingStore = create((set) => ({
   setWizardOpen: (open) => set({ wizardOpen: open }),
   setWizardStep: (step) => set({ wizardStep: step }),
   setWallOpacity: (opacity) => set({ wallOpacity: opacity }),
+  setSelectedFloor: (floor) => set({ selectedFloor: floor }),
+
+  // Global base outline (fallback for floors without a per-floor outline)
   setOutline: (points) => set((state) => ({ building: { ...state.building, outline: points } })),
   clearOutline: () => set((state) => ({ building: { ...state.building, outline: [] } })),
+
+  // Per-floor outlines
+  setFloorOutline: (floorIndex, points) =>
+    set((state) => ({
+      building: {
+        ...state.building,
+        floorOutlines: { ...(state.building.floorOutlines || {}), [floorIndex]: points },
+      },
+    })),
+  clearFloorOutline: (floorIndex) =>
+    set((state) => {
+      const { [floorIndex]: _removed, ...rest } = state.building.floorOutlines || {}
+      return { building: { ...state.building, floorOutlines: rest } }
+    }),
 }))
 
 export default useBuildingStore
