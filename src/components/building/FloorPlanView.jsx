@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react'
 import {
-  Stage, Layer, Rect, Line, Circle, Text, Arc, Group, RegularPolygon,
+  Stage, Layer, Rect, Line, Circle, Text, Arc, Group,
 } from 'react-konva'
 import useBuildingStore from '../../store/buildingStore'
 import { ELEMENT_COLORS, ELEMENT_DEFAULTS, ELEMENT_NAMES } from '../../utils/buildingUtils'
@@ -11,12 +11,12 @@ const SNAP_DISTANCE = 16
 const ANGLE_SNAP_THRESHOLD_DEG = 10
 const RIGHT_ANGLE_BOX_SIZE_PX  = 14
 
-// Element types that live on the floor plan (placed by clicking in FloorPlanView)
+// Which elements live on the floor plan (not staircase — handled separately)
 const FLOOR_PLAN_ELEMENTS = new Set([
-  'staircase', 'elevator', 'door', 'entrance', 'column', 'wall', 'arc-wall',
+  'elevator', 'door', 'entrance', 'column', 'wall', 'arc-wall',
 ])
 
-// ─── Pure geometry helpers ────────────────────────────────────────────────────
+// ─── Geometry helpers ─────────────────────────────────────────────────────────
 
 function interiorAngleDeg(prev, curr, next) {
   const d1x = curr.x - prev.x, d1y = curr.y - prev.y
@@ -114,7 +114,6 @@ function resolveCurrentOutline(floorOutlines, floorIndex, globalOutline) {
   return []
 }
 
-// Convert mouse pixel position to meter coordinates clamped to ≥0
 function toMeters(px, py) {
   return {
     x: Math.max(0, (px - PADDING) / SCALE),
@@ -122,7 +121,146 @@ function toMeters(px, py) {
   }
 }
 
-// ─── Element shape renderers in floor-plan view ───────────────────────────────
+// Bounding box of a polygon in meters
+function polyBBox(pts) {
+  if (!pts || pts.length === 0) return { minX: 0, minY: 0, maxX: 0, maxY: 0, w: 0, h: 0 }
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  pts.forEach(({ x, y }) => { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y) })
+  return { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY }
+}
+
+// ─── Staircase diagram renderer (2D floor-plan symbol) ───────────────────────
+
+function StaircaseDiagram({ sc, scale, padding, isSelected, onSelect, onDragEnd }) {
+  const pts  = sc.outline
+  if (!pts || pts.length < 3) return null
+  const flat = pts.flatMap(p => [padding + p.x * scale, padding + p.y * scale])
+  const fillColor   = isSelected ? 'rgba(251,146,60,0.35)' : 'rgba(251,146,60,0.18)'
+  const strokeColor = isSelected ? '#fb923c' : '#c2410c'
+  const sw          = isSelected ? 2.5 : 1.5
+
+  const bb   = polyBBox(pts)
+  const cx   = padding + (bb.minX + bb.w / 2) * scale
+  const cy   = padding + (bb.minY + bb.h / 2) * scale
+  const type = sc.properties?.type || 'straight'
+  const stepsPerFlight = sc.properties?.stepsPerFlight || 9
+  const boxW = bb.w * scale, boxH = bb.h * scale
+  const bx   = padding + bb.minX * scale
+  const by   = padding + bb.minY * scale
+
+  const interior = []
+  const nSteps = Math.max(3, Math.min(stepsPerFlight, 20))
+
+  if (type === 'straight') {
+    // Horizontal step lines from bottom to top of bbox
+    for (let s = 1; s < nSteps; s++) {
+      const sy = by + (s / nSteps) * boxH
+      interior.push(<Line key={`s${s}`} points={[bx + 2, sy, bx + boxW - 2, sy]}
+        stroke="rgba(255,255,255,0.3)" strokeWidth={0.7} listening={false} />)
+    }
+    // Arrow up
+    interior.push(
+      <Line key="arrow" points={[cx, by + boxH * 0.8, cx, by + boxH * 0.1]}
+        stroke="#fff" strokeWidth={1.5} listening={false} />,
+      <Line key="arrowhead" points={[cx - 5, by + boxH * 0.25, cx, by + boxH * 0.1, cx + 5, by + boxH * 0.25]}
+        stroke="#fff" strokeWidth={1.5} listening={false} />
+    )
+  } else if (type === 'l-shaped') {
+    // Two flights at 90°: first goes up half, then turns right
+    const midY = by + boxH * 0.5
+    const midX = bx + boxW * 0.5
+    for (let s = 1; s < nSteps; s++) {
+      if (s <= nSteps / 2) {
+        const sy = by + (s / (nSteps / 2)) * (boxH * 0.45)
+        interior.push(<Line key={`s${s}`} points={[bx + 2, sy, midX, sy]}
+          stroke="rgba(255,255,255,0.3)" strokeWidth={0.7} listening={false} />)
+      } else {
+        const sx = midX + ((s - nSteps / 2) / (nSteps / 2)) * (boxW * 0.45)
+        interior.push(<Line key={`s${s}`} points={[sx, midY, sx, by + boxH - 2]}
+          stroke="rgba(255,255,255,0.3)" strokeWidth={0.7} listening={false} />)
+      }
+    }
+    // Landing rectangle
+    interior.push(<Rect key="landing" x={bx + 2} y={midY - 4} width={midX - bx - 2} height={8}
+      fill="rgba(251,146,60,0.3)" stroke="rgba(255,255,255,0.4)" strokeWidth={0.5} listening={false} />)
+    interior.push(<Line key="ar1" points={[bx + boxW * 0.1, by + boxH * 0.9, bx + boxW * 0.1, midY]}
+      stroke="#fff" strokeWidth={1.2} listening={false} />)
+    interior.push(<Line key="ar2" points={[midX, midY, bx + boxW * 0.9, midY]}
+      stroke="#fff" strokeWidth={1.2} listening={false} />)
+    interior.push(<Line key="ah2" points={[bx + boxW * 0.78, midY - 4, bx + boxW * 0.9, midY, bx + boxW * 0.78, midY + 4]}
+      stroke="#fff" strokeWidth={1.2} listening={false} />)
+  } else if (type === 'u-shaped') {
+    // Two parallel flights with landing between
+    const lx  = bx + boxW * 0.15
+    const rx  = bx + boxW * 0.55
+    const fw  = boxW * 0.25
+    const midY = by + boxH * 0.5
+    for (let s = 1; s < nSteps; s++) {
+      const sy = by + (s / nSteps) * boxH
+      interior.push(<Line key={`sl${s}`} points={[lx, sy, lx + fw, sy]}
+        stroke="rgba(255,255,255,0.3)" strokeWidth={0.7} listening={false} />)
+      const sy2 = by + boxH - (s / nSteps) * boxH
+      interior.push(<Line key={`sr${s}`} points={[rx, sy2, rx + fw, sy2]}
+        stroke="rgba(255,255,255,0.3)" strokeWidth={0.7} listening={false} />)
+    }
+    // Landing
+    interior.push(<Rect key="landing" x={lx + fw} y={by + boxH * 0.05} width={rx - (lx + fw)} height={boxH * 0.9}
+      fill="rgba(251,146,60,0.25)" stroke="rgba(255,255,255,0.4)" strokeWidth={0.5} listening={false} />)
+    interior.push(<Line key="ar1" points={[lx + fw / 2, by + boxH * 0.85, lx + fw / 2, by + boxH * 0.15]}
+      stroke="#fff" strokeWidth={1.2} listening={false} />)
+    interior.push(<Line key="ah1" points={[lx + fw / 2 - 4, by + boxH * 0.25, lx + fw / 2, by + boxH * 0.15, lx + fw / 2 + 4, by + boxH * 0.25]}
+      stroke="#fff" strokeWidth={1.2} listening={false} />)
+    interior.push(<Line key="ar2" points={[rx + fw / 2, by + boxH * 0.15, rx + fw / 2, by + boxH * 0.85]}
+      stroke="#fff" strokeWidth={1.2} listening={false} />)
+    interior.push(<Line key="ah2" points={[rx + fw / 2 - 4, by + boxH * 0.75, rx + fw / 2, by + boxH * 0.85, rx + fw / 2 + 4, by + boxH * 0.75]}
+      stroke="#fff" strokeWidth={1.2} listening={false} />)
+  } else if (type === 'spiral') {
+    const r  = Math.min(boxW, boxH) * 0.4
+    for (let i = 0; i < nSteps; i++) {
+      const a1 = (i / nSteps) * Math.PI * 2 - Math.PI / 2
+      const a2 = ((i + 1) / nSteps) * Math.PI * 2 - Math.PI / 2
+      interior.push(<Line key={`s${i}`}
+        points={[cx, cy, cx + r * Math.cos(a1), cy + r * Math.sin(a1)]}
+        stroke="rgba(255,255,255,0.25)" strokeWidth={0.7} listening={false} />)
+    }
+    // Outer spiral circle
+    interior.push(<Circle key="outer" x={cx} y={cy} radius={r}
+      stroke="rgba(255,255,255,0.4)" strokeWidth={1} fill="transparent" listening={false} />)
+    // Centre post
+    interior.push(<Circle key="inner" x={cx} y={cy} radius={r * 0.15}
+      fill="#fb923c" stroke="#fff" strokeWidth={1} listening={false} />)
+    // Arrow
+    interior.push(<Line key="arrow" points={[cx + r * 0.5, cy - r * 0.05, cx + r * 0.9, cy - r * 0.05]}
+      stroke="#fff" strokeWidth={1.5} listening={false} />)
+    interior.push(<Line key="ah" points={[cx + r * 0.78, cy - r * 0.12, cx + r * 0.9, cy - r * 0.05, cx + r * 0.78, cy + r * 0.02]}
+      stroke="#fff" strokeWidth={1.5} listening={false} />)
+  }
+
+  // Label
+  const label = sc.name || 'Klatka'
+  const typeLabel = { straight: 'proste', 'l-shaped': 'L', 'u-shaped': 'U', spiral: 'kręte' }[type] || type
+
+  return (
+    <Group
+      draggable={false}
+      onClick={(e) => { e.cancelBubble = true; onSelect(sc.id) }}
+      onTap={(e) => { e.cancelBubble = true; onSelect(sc.id) }}
+    >
+      <Line points={flat} stroke={strokeColor} strokeWidth={sw} closed
+        fill={fillColor} listening={true} />
+      {interior}
+      <Text text={`${label}\n(${typeLabel}, ${stepsPerFlight}×)`}
+        x={cx - 28} y={cy + boxH * 0.15}
+        fontSize={9} fill="#fed7aa" align="center" listening={false} />
+      {isSelected && (
+        <Line points={flat} stroke="#fff" strokeWidth={1} closed
+          fill="transparent" dash={[4, 3]} listening={false} />
+      )}
+    </Group>
+  )
+}
+
+// ─── ElementShape renderer ────────────────────────────────────────────────────
 
 function ElementShape({ el, scale, padding, isSelected, onSelect, onDragEnd }) {
   const color   = ELEMENT_COLORS[el.type] || '#94a3b8'
@@ -148,34 +286,7 @@ function ElementShape({ el, scale, padding, isSelected, onSelect, onDragEnd }) {
     return (
       <Group {...commonProps} x={ex} y={ey}>
         <Circle radius={ew / 2} fill={color} stroke={strokeColor} strokeWidth={strokeWidth} />
-        {isSelected && (
-          <Circle radius={ew / 2 + 4} stroke="#fff" strokeWidth={1} dash={[4, 3]} fill="transparent" />
-        )}
-      </Group>
-    )
-  }
-
-  if (el.type === 'staircase') {
-    const steps = el.properties?.steps || 12
-    const stepH = ed / steps
-    const lines = []
-    for (let s = 1; s < steps; s++) {
-      lines.push(
-        <Line key={s} points={[0, s * stepH, ew, s * stepH]}
-          stroke="rgba(255,255,255,0.25)" strokeWidth={0.5} listening={false} />
-      )
-    }
-    return (
-      <Group {...commonProps} x={ex} y={ey}>
-        <Rect width={ew} height={ed} fill={color} opacity={0.85}
-          stroke={strokeColor} strokeWidth={strokeWidth} />
-        {lines}
-        {/* Arrow indicating stair direction */}
-        <Line points={[ew / 2, ed * 0.15, ew / 2, ed * 0.85]}
-          stroke="#fff" strokeWidth={2} listening={false} />
-        <Line points={[ew / 2 - 5, ed * 0.7, ew / 2, ed * 0.85, ew / 2 + 5, ed * 0.7]}
-          stroke="#fff" strokeWidth={2} listening={false} />
-        <Text text="SC" x={2} y={2} fontSize={9} fill="rgba(0,0,0,0.6)" listening={false} />
+        {isSelected && <Circle radius={ew / 2 + 4} stroke="#fff" strokeWidth={1} dash={[4, 3]} fill="transparent" />}
       </Group>
     )
   }
@@ -183,11 +294,8 @@ function ElementShape({ el, scale, padding, isSelected, onSelect, onDragEnd }) {
   if (el.type === 'elevator') {
     return (
       <Group {...commonProps} x={ex} y={ey}>
-        <Rect width={ew} height={ed} fill={color} opacity={0.8}
-          stroke={strokeColor} strokeWidth={strokeWidth} />
-        {/* Elevator doors line */}
-        <Line points={[ew / 2, 0, ew / 2, ed]}
-          stroke="rgba(255,255,255,0.5)" strokeWidth={1.5} listening={false} />
+        <Rect width={ew} height={ed} fill={color} opacity={0.8} stroke={strokeColor} strokeWidth={strokeWidth} />
+        <Line points={[ew / 2, 0, ew / 2, ed]} stroke="rgba(255,255,255,0.5)" strokeWidth={1.5} listening={false} />
         <Circle x={ew / 2} y={ed / 2} radius={3} fill="#93c5fd" listening={false} />
         <Text text="EL" x={2} y={2} fontSize={9} fill="rgba(0,0,0,0.6)" listening={false} />
       </Group>
@@ -195,57 +303,28 @@ function ElementShape({ el, scale, padding, isSelected, onSelect, onDragEnd }) {
   }
 
   if (el.type === 'door' || el.type === 'entrance') {
-    const dw    = ew   // door width in px
-    const rot   = el.properties?.rotation ?? 0
-    const swing = el.properties?.swing ?? 90  // swing angle in degrees
+    const dw  = ew, rot = el.properties?.rotation ?? 0, swing = el.properties?.swing ?? 90
     return (
       <Group {...commonProps} x={ex} y={ey} rotation={rot}>
-        {/* Door frame (wall line) */}
-        <Line points={[0, 0, dw, 0]}
-          stroke={color} strokeWidth={3} lineCap="round" listening={false} />
-        {/* Door leaf */}
-        <Line points={[0, 0, 0, -dw]}
-          stroke={color} strokeWidth={1.5} listening={false} />
-        {/* Swing arc */}
-        <Arc
-          x={0} y={0}
-          innerRadius={dw - 2} outerRadius={dw}
-          angle={swing}
-          rotation={-swing}
-          fill={`${color}30`}
-          stroke={color} strokeWidth={1}
-          listening={false}
-        />
-        {isSelected && (
-          <Rect x={-4} y={-dw - 4} width={dw + 8} height={dw + 8}
-            stroke="#fff" strokeWidth={1} dash={[4, 3]} fill="transparent" />
-        )}
+        <Line points={[0, 0, dw, 0]} stroke={color} strokeWidth={3} lineCap="round" listening={false} />
+        <Line points={[0, 0, 0, -dw]} stroke={color} strokeWidth={1.5} listening={false} />
+        <Arc x={0} y={0} innerRadius={dw - 2} outerRadius={dw} angle={swing} rotation={-swing}
+          fill={`${color}30`} stroke={color} strokeWidth={1} listening={false} />
+        {isSelected && <Rect x={-4} y={-dw - 4} width={dw + 8} height={dw + 8} stroke="#fff" strokeWidth={1} dash={[4, 3]} fill="transparent" />}
       </Group>
     )
   }
 
   if (el.type === 'arc-wall') {
-    const radius    = (el.properties?.radius ?? 2) * scale
-    const startDeg  = el.properties?.startAngle ?? 0
-    const sweepDeg  = (el.properties?.endAngle ?? 90) - startDeg
+    const radius   = (el.properties?.radius ?? 2) * scale
+    const startDeg = el.properties?.startAngle ?? 0
+    const sweepDeg = (el.properties?.endAngle ?? 90) - startDeg
     return (
       <Group {...commonProps} x={ex} y={ey}>
-        <Arc
-          innerRadius={radius - 4} outerRadius={radius + 4}
-          angle={Math.abs(sweepDeg)}
-          rotation={startDeg}
-          fill={`${color}40`}
-          stroke={color} strokeWidth={isSelected ? 3 : 2}
-        />
-        {isSelected && (
-          <Arc
-            innerRadius={radius - 8} outerRadius={radius + 8}
-            angle={Math.abs(sweepDeg)}
-            rotation={startDeg}
-            fill="transparent"
-            stroke="#fff" strokeWidth={1} dash={[4, 3]}
-          />
-        )}
+        <Arc innerRadius={radius - 4} outerRadius={radius + 4} angle={Math.abs(sweepDeg)} rotation={startDeg}
+          fill={`${color}40`} stroke={color} strokeWidth={isSelected ? 3 : 2} />
+        {isSelected && <Arc innerRadius={radius - 8} outerRadius={radius + 8} angle={Math.abs(sweepDeg)} rotation={startDeg}
+          fill="transparent" stroke="#fff" strokeWidth={1} dash={[4, 3]} />}
       </Group>
     )
   }
@@ -253,18 +332,15 @@ function ElementShape({ el, scale, padding, isSelected, onSelect, onDragEnd }) {
   if (el.type === 'wall') {
     return (
       <Group {...commonProps} x={ex} y={ey} rotation={el.properties?.rotation ?? 0}>
-        <Rect width={ew} height={Math.max((el.depth || 0.15) * scale, 4)}
-          fill={color} opacity={0.9}
+        <Rect width={ew} height={Math.max((el.depth || 0.15) * scale, 4)} fill={color} opacity={0.9}
           stroke={strokeColor} strokeWidth={strokeWidth} />
       </Group>
     )
   }
 
-  // Generic fallback
   return (
     <Group {...commonProps} x={ex} y={ey}>
-      <Rect width={ew} height={ed} fill={color} opacity={0.85}
-        stroke={strokeColor} strokeWidth={strokeWidth} />
+      <Rect width={ew} height={ed} fill={color} opacity={0.85} stroke={strokeColor} strokeWidth={strokeWidth} />
     </Group>
   )
 }
@@ -275,29 +351,31 @@ export default function FloorPlanView() {
   const containerRef  = useRef(null)
   const dimInputRef   = useRef(null)
 
-  const [size, setSize]             = useState({ width: 800, height: 600 })
+  const [size, setSize]                   = useState({ width: 800, height: 600 })
   const [drawingPoints, setDrawingPoints] = useState([])
-  const [snapResult, setSnapResult] = useState({ pos: null, snapped: false, is90: false })
-  const [dimEdit, setDimEdit]       = useState(null)
+  const [snapResult, setSnapResult]       = useState({ pos: null, snapped: false, is90: false })
+  const [dimEdit, setDimEdit]             = useState(null)
 
   const {
-    building, elements, activeTool, setActiveTool,
+    building, elements, staircases, activeTool, setActiveTool,
     selectedFloor, setSelectedFloor,
     selectedElementId, setSelectedElementId,
-    setFloorOutline, clearFloorOutline,
-    setOutline, clearOutline,
+    selectedStaircaseId, setSelectedStaircaseId,
+    setFloorOutline, clearFloorOutline, setOutline, clearOutline,
     addElement, updateElement,
+    addStaircase, removeStaircase,
   } = useBuildingStore()
 
   const floorOutlines   = building.floorOutlines || {}
   const currentOutline  = resolveCurrentOutline(floorOutlines, selectedFloor, building.outline)
-  // Floor-plan elements: elements belonging to this floor that can be placed on the plan
   const floorElements   = elements.filter(
     (e) => e.floor === selectedFloor && FLOOR_PLAN_ELEMENTS.has(e.type)
   )
 
-  const isDrawing       = activeTool === 'draw-outline'
-  const placingType     = activeTool?.startsWith('add-') ? activeTool.replace('add-', '') : null
+  const isDrawingOutline    = activeTool === 'draw-outline'
+  const isDrawingStaircase  = activeTool === 'draw-staircase'
+  const isDrawing           = isDrawingOutline || isDrawingStaircase
+  const placingType         = activeTool?.startsWith('add-') ? activeTool.replace('add-', '') : null
 
   // ── Resize observer ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -314,9 +392,12 @@ export default function FloorPlanView() {
   }, [selectedFloor])
 
   useEffect(() => {
-    if (selectedFloor >= building.floors) {
-      setSelectedFloor(Math.max(0, building.floors - 1))
-    }
+    // reset drawing when tool changes
+    setDrawingPoints([])
+  }, [activeTool])
+
+  useEffect(() => {
+    if (selectedFloor >= building.floors) setSelectedFloor(Math.max(0, building.floors - 1))
   }, [building.floors, selectedFloor, setSelectedFloor])
 
   useEffect(() => {
@@ -327,21 +408,39 @@ export default function FloorPlanView() {
   }, [dimEdit])
 
   // ── Outline helpers ──────────────────────────────────────────────────────────
-  const isNearStart = (mx, my) => {
-    if (drawingPoints.length < 3) return false
-    const sx = PADDING + drawingPoints[0].x * SCALE
-    const sy = PADDING + drawingPoints[0].y * SCALE
+  const isNearStart = (mx, my, pts) => {
+    if (!pts || pts.length < 3) return false
+    const sx = PADDING + pts[0].x * SCALE, sy = PADDING + pts[0].y * SCALE
     return Math.hypot(mx - sx, my - sy) < SNAP_DISTANCE
   }
 
-  const commitDrawing = (pts) => {
+  const commitBuildingOutline = (pts) => {
     setFloorOutline(selectedFloor, pts)
     if (selectedFloor === 0) setOutline(pts)
     setDrawingPoints([])
     setActiveTool('select')
   }
 
-  const cancelDrawing = () => { setDrawingPoints([]); setActiveTool('select') }
+  const commitStaircase = (pts) => {
+    const stairCount = staircases.length + 1
+    addStaircase({
+      name: `Klatka ${stairCount}`,
+      outline: pts,
+      properties: {
+        type: 'straight',
+        stepsPerFlight: 9,
+        flights: 2,
+        stepWidth: 1.2,
+        stepDepth: 0.28,
+        stepHeight: 0.175,
+        hasElevator: false,
+        hasBanister: true,
+        landingDepth: 1.2,
+      },
+    })
+    setDrawingPoints([])
+    setActiveTool('select')
+  }
 
   const handleClearFloor = () => {
     clearFloorOutline(selectedFloor)
@@ -367,36 +466,35 @@ export default function FloorPlanView() {
 
   // ── Stage events ─────────────────────────────────────────────────────────────
   const handleStageClick = (e) => {
-    // Deselect if clicking background
     if (e.target === e.target.getStage() && !isDrawing && !placingType) {
       setSelectedElementId(null)
+      setSelectedStaircaseId(null)
       return
     }
 
-    // ── Outline drawing ──
-    if (isDrawing) {
+    if (isDrawingOutline || isDrawingStaircase) {
       const raw  = e.target.getStage().getPointerPosition()
       const snap = smartAngleSnap(drawingPoints, raw.x, raw.y)
       const pos  = drawingPoints.length > 0 ? snap.pos : raw
-      if (isNearStart(pos.x, pos.y)) { commitDrawing(drawingPoints); return }
+
+      if (isNearStart(pos.x, pos.y, drawingPoints)) {
+        if (isDrawingOutline) commitBuildingOutline(drawingPoints)
+        else commitStaircase(drawingPoints)
+        return
+      }
       setDrawingPoints([...drawingPoints, toMeters(pos.x, pos.y)])
       return
     }
 
-    // ── Element placement ──
     if (placingType && ELEMENT_DEFAULTS[placingType]) {
       const stage = e.target.getStage()
       const pos   = stage.getPointerPosition()
       const m     = toMeters(pos.x, pos.y)
       const def   = ELEMENT_DEFAULTS[placingType]
       addElement({
-        type:    placingType,
-        floor:   selectedFloor,
-        x:       Math.max(0, m.x),
-        y:       Math.max(0, m.y),
-        width:   def.width,
-        height:  def.height,
-        depth:   def.depth,
+        type: placingType, floor: selectedFloor,
+        x: Math.max(0, m.x), y: Math.max(0, m.y),
+        width: def.width, height: def.height, depth: def.depth,
         properties: { ...def.properties },
       })
       setActiveTool('select')
@@ -406,7 +504,8 @@ export default function FloorPlanView() {
   const handleDblClick = (e) => {
     if (!isDrawing || drawingPoints.length < 3) return
     e.evt?.preventDefault?.()
-    commitDrawing(drawingPoints)
+    if (isDrawingOutline) commitBuildingOutline(drawingPoints)
+    else commitStaircase(drawingPoints)
   }
 
   const handleMouseMove = (e) => {
@@ -415,59 +514,57 @@ export default function FloorPlanView() {
     if (isDrawing) {
       const snap = smartAngleSnap(drawingPoints, pos.x, pos.y)
       setSnapResult(snap.snapped ? snap : { pos, snapped: false, is90: false })
+    } else {
+      setSnapResult(prev => ({ ...prev, pos }))
     }
   }
 
   const handleKeyDown = (e) => {
     if (e.key === 'Escape') {
-      if (isDrawing) cancelDrawing()
-      else { setActiveTool('select'); setSelectedElementId(null) }
+      if (isDrawing) { setDrawingPoints([]); setActiveTool('select') }
+      else { setActiveTool('select'); setSelectedElementId(null); setSelectedStaircaseId(null) }
     }
-    if (e.key === 'Delete' || e.key === 'Backspace') {
+    if ((e.key === 'Delete' || e.key === 'Backspace') && !e.target.matches('input')) {
       if (selectedElementId) {
         const { removeElement } = useBuildingStore.getState()
         removeElement(selectedElementId)
         setSelectedElementId(null)
       }
+      if (selectedStaircaseId) {
+        removeStaircase(selectedStaircaseId)
+        setSelectedStaircaseId(null)
+      }
     }
   }
 
-  // ── Canvas cursor ─────────────────────────────────────────────────────────────
   const cursor = isDrawing || placingType ? 'crosshair' : 'default'
 
   // ── Rendering ─────────────────────────────────────────────────────────────────
+
   const renderGrid = () => {
     const lines = [], maxW = building.width + 5, maxH = building.depth + 5
     for (let x = 0; x <= maxW; x++) {
-      lines.push(<Line key={`v${x}`}
-        points={[PADDING + x * SCALE, 0, PADDING + x * SCALE, size.height]}
-        stroke={x % 5 === 0 ? '#334155' : '#1e2533'}
-        strokeWidth={x % 5 === 0 ? 1 : 0.5} listening={false} />)
+      lines.push(<Line key={`v${x}`} points={[PADDING + x * SCALE, 0, PADDING + x * SCALE, size.height]}
+        stroke={x % 5 === 0 ? '#334155' : '#1e2533'} strokeWidth={x % 5 === 0 ? 1 : 0.5} listening={false} />)
     }
     for (let y = 0; y <= maxH; y++) {
-      lines.push(<Line key={`h${y}`}
-        points={[0, PADDING + y * SCALE, size.width, PADDING + y * SCALE]}
-        stroke={y % 5 === 0 ? '#334155' : '#1e2533'}
-        strokeWidth={y % 5 === 0 ? 1 : 0.5} listening={false} />)
+      lines.push(<Line key={`h${y}`} points={[0, PADDING + y * SCALE, size.width, PADDING + y * SCALE]}
+        stroke={y % 5 === 0 ? '#334155' : '#1e2533'} strokeWidth={y % 5 === 0 ? 1 : 0.5} listening={false} />)
     }
     for (let x = 0; x <= building.width; x += 5) {
-      lines.push(<Text key={`xl${x}`}
-        x={PADDING + x * SCALE - 10} y={PADDING - 22}
+      lines.push(<Text key={`xl${x}`} x={PADDING + x * SCALE - 10} y={PADDING - 22}
         text={`${x}m`} fontSize={11} fill="#475569" listening={false} />)
     }
     for (let y = 0; y <= building.depth; y += 5) {
-      lines.push(<Text key={`yl${y}`}
-        x={4} y={PADDING + y * SCALE - 7}
+      lines.push(<Text key={`yl${y}`} x={4} y={PADDING + y * SCALE - 7}
         text={`${y}m`} fontSize={11} fill="#475569" listening={false} />)
     }
     return lines
   }
 
   const renderDefaultRect = () => (
-    <Rect x={PADDING} y={PADDING}
-      width={building.width * SCALE} height={building.depth * SCALE}
-      stroke="#334155" strokeWidth={1.5} dash={[6, 4]}
-      fill="transparent" listening={false} />
+    <Rect x={PADDING} y={PADDING} width={building.width * SCALE} height={building.depth * SCALE}
+      stroke="#334155" strokeWidth={1.5} dash={[6, 4]} fill="transparent" listening={false} />
   )
 
   const renderGhostOutlines = () => {
@@ -476,9 +573,8 @@ export default function FloorPlanView() {
       if (fi === selectedFloor) continue
       const ol = floorOutlines[fi]
       if (!ol || ol.length < 3) continue
-      const flat = ol.flatMap((p) => [PADDING + p.x * SCALE, PADDING + p.y * SCALE])
-      items.push(<Line key={`ghost${fi}`} points={flat}
-        stroke="#374151" strokeWidth={1} closed
+      const flat = ol.flatMap(p => [PADDING + p.x * SCALE, PADDING + p.y * SCALE])
+      items.push(<Line key={`ghost${fi}`} points={flat} stroke="#374151" strokeWidth={1} closed
         fill="rgba(55,65,81,0.08)" dash={[4, 3]} listening={false} />)
     }
     return items
@@ -487,18 +583,14 @@ export default function FloorPlanView() {
   const renderCurrentOutline = () => {
     if (currentOutline.length < 2) return null
     const pts = currentOutline, n = pts.length
-    const flat = pts.flatMap((p) => [PADDING + p.x * SCALE, PADDING + p.y * SCALE])
+    const flat = pts.flatMap(p => [PADDING + p.x * SCALE, PADDING + p.y * SCALE])
     const items = [
-      <Line key="outline" points={flat}
-        stroke="#3b82f6" strokeWidth={2.5} closed
-        fill="rgba(59,130,246,0.12)" listening={false} />,
+      <Line key="outline" points={flat} stroke="#3b82f6" strokeWidth={2.5} closed fill="rgba(59,130,246,0.12)" listening={false} />,
       ...pts.map((p, i) => (
-        <Circle key={`vt${i}`}
-          x={PADDING + p.x * SCALE} y={PADDING + p.y * SCALE}
+        <Circle key={`vt${i}`} x={PADDING + p.x * SCALE} y={PADDING + p.y * SCALE}
           radius={4} fill="#3b82f6" stroke="#fff" strokeWidth={1} listening={false} />
       )),
     ]
-
     for (let i = 0; i < n; i++) {
       const a = pts[i], b = pts[(i + 1) % n]
       const ax = PADDING + a.x * SCALE, ay = PADDING + a.y * SCALE
@@ -506,13 +598,12 @@ export default function FloorPlanView() {
       const ddx = bx - ax, ddy = by - ay
       const segLen = Math.hypot(b.x - a.x, b.y - a.y)
       const ll = Math.hypot(ddx, ddy)
-      const offX = ll > 0 ? (-ddy / ll) * 13 : 0
-      const offY = ll > 0 ? ( ddx / ll) * 13 : 0
+      const offX = ll > 0 ? (-ddy / ll) * 13 : 0, offY = ll > 0 ? (ddx / ll) * 13 : 0
       const mx = (ax + bx) / 2 + offX, my = (ay + by) / 2 + offY
       const si = i
       items.push(
-        <Text key={`dl${i}`} x={mx - 18} y={my - 8}
-          text={`${segLen.toFixed(2)}m`} fontSize={11} fill="#60a5fa"
+        <Text key={`dl${i}`} x={mx - 18} y={my - 8} text={`${segLen.toFixed(2)}m`}
+          fontSize={11} fill="#60a5fa"
           onMouseEnter={(e) => { e.target.fill('#93c5fd'); e.target.getLayer().batchDraw(); e.target.getStage().container().style.cursor = 'pointer' }}
           onMouseLeave={(e) => { e.target.fill('#60a5fa'); e.target.getLayer().batchDraw(); e.target.getStage().container().style.cursor = cursor }}
           onClick={(e) => {
@@ -523,25 +614,20 @@ export default function FloorPlanView() {
           listening={true} />
       )
     }
-
     if (n >= 3) {
       for (let i = 0; i < n; i++) {
         const prev = pts[(i - 1 + n) % n], curr = pts[i], next = pts[(i + 1) % n]
         const angle = interiorAngleDeg(prev, curr, next)
         const d1x = -(curr.x - prev.x), d1y = -(curr.y - prev.y)
-        const d2x =   next.x - curr.x,  d2y =   next.y - curr.y
+        const d2x = next.x - curr.x, d2y = next.y - curr.y
         const d1l = Math.hypot(d1x, d1y) || 1, d2l = Math.hypot(d2x, d2y) || 1
-        const bx  = d1x / d1l + d2x / d2l, by = d1y / d1l + d2y / d2l
-        const bl  = Math.hypot(bx, by) || 1
-        const OFF = 22
-        const lx  = PADDING + curr.x * SCALE + (bx / bl) * OFF
-        const ly  = PADDING + curr.y * SCALE + (by / bl) * OFF
-        const vi  = i
-        const is90 = Math.abs(angle - 90) < 1.5
-        const fillColor = is90 ? '#06b6d4' : '#94a3b8'
+        const bx = d1x / d1l + d2x / d2l, by = d1y / d1l + d2y / d2l
+        const bl = Math.hypot(bx, by) || 1
+        const lx = PADDING + curr.x * SCALE + (bx / bl) * 22
+        const ly = PADDING + curr.y * SCALE + (by / bl) * 22
+        const vi = i, is90 = Math.abs(angle - 90) < 1.5, fillColor = is90 ? '#06b6d4' : '#94a3b8'
         items.push(
-          <Text key={`al${i}`} x={lx - 14} y={ly - 8}
-            text={is90 ? '⊾ 90°' : `${angle.toFixed(1)}°`}
+          <Text key={`al${i}`} x={lx - 14} y={ly - 8} text={is90 ? '⊾ 90°' : `${angle.toFixed(1)}°`}
             fontSize={10} fill={fillColor}
             onMouseEnter={(e) => { e.target.fill('#e2e8f0'); e.target.getLayer().batchDraw(); e.target.getStage().container().style.cursor = 'pointer' }}
             onMouseLeave={(e) => { e.target.fill(fillColor); e.target.getLayer().batchDraw(); e.target.getStage().container().style.cursor = cursor }}
@@ -557,8 +643,22 @@ export default function FloorPlanView() {
     return items
   }
 
+  const renderStaircases = () => {
+    return staircases.map(sc => (
+      <StaircaseDiagram
+        key={sc.id}
+        sc={sc}
+        scale={SCALE}
+        padding={PADDING}
+        isSelected={sc.id === selectedStaircaseId}
+        onSelect={setSelectedStaircaseId}
+        onDragEnd={() => {}}
+      />
+    ))
+  }
+
   const renderElements = () => {
-    return floorElements.map((el) => (
+    return floorElements.map(el => (
       <ElementShape
         key={el.id}
         el={el}
@@ -571,50 +671,47 @@ export default function FloorPlanView() {
     ))
   }
 
-  const renderDrawing = () => {
+  const renderDrawingPreview = () => {
     const mp = snapResult.pos
     if (drawingPoints.length === 0) return null
-    const nearStart = mp ? isNearStart(mp.x, mp.y) : false
+    const nearStart = mp ? isNearStart(mp.x, mp.y, drawingPoints) : false
     const { is90, snapped } = snapResult
-    const lineColor = nearStart ? '#22c55e' : is90 ? '#06b6d4' : '#f59e0b'
-    const flatFixed = drawingPoints.flatMap((p) => [PADDING + p.x * SCALE, PADDING + p.y * SCALE])
+    const isStaircase = isDrawingStaircase
+    const lineColor = nearStart ? '#22c55e' : isStaircase ? '#fb923c' : (is90 ? '#06b6d4' : '#f59e0b')
+    const flatFixed = drawingPoints.flatMap(p => [PADDING + p.x * SCALE, PADDING + p.y * SCALE])
     const previewLine = mp ? [...flatFixed, mp.x, mp.y] : flatFixed
     const items = []
 
-    if (previewLine.length >= 4) {
-      items.push(<Line key="dl" points={previewLine} stroke={lineColor}
-        strokeWidth={2} dash={[6, 3]} listening={false} />)
-    }
+    if (previewLine.length >= 4)
+      items.push(<Line key="dl" points={previewLine} stroke={lineColor} strokeWidth={2} dash={[6, 3]} listening={false} />)
+
     drawingPoints.forEach((p, i) => {
       items.push(<Circle key={`dv${i}`}
         x={PADDING + p.x * SCALE} y={PADDING + p.y * SCALE}
         radius={i === 0 ? 8 : 5}
-        fill={i === 0 ? (nearStart ? '#22c55e' : '#f59e0b') : '#f59e0b'}
+        fill={i === 0 ? (nearStart ? '#22c55e' : lineColor) : lineColor}
         stroke="#fff" strokeWidth={1.5} listening={false} />)
     })
+
     if (drawingPoints.length >= 3) {
       items.push(<Text key="closehint"
-        x={PADDING + drawingPoints[0].x * SCALE + 12}
-        y={PADDING + drawingPoints[0].y * SCALE - 18}
-        text={nearStart ? '✓ Zamknij kontur' : 'Kliknij punkt startowy, aby zamknąć'}
+        x={PADDING + drawingPoints[0].x * SCALE + 12} y={PADDING + drawingPoints[0].y * SCALE - 18}
+        text={nearStart ? '✓ Zamknij' : (isStaircase ? 'Kliknij start, aby zamknąć klatkę' : 'Kliknij punkt startowy, aby zamknąć')}
         fontSize={11} fill={nearStart ? '#22c55e' : '#94a3b8'} listening={false} />)
     }
+
     if (mp && drawingPoints.length > 0) {
       const last   = drawingPoints[drawingPoints.length - 1]
       const lastPx = PADDING + last.x * SCALE, lastPy = PADDING + last.y * SCALE
       const curM   = toMeters(mp.x, mp.y)
       const dist   = Math.hypot(curM.x - last.x, curM.y - last.y)
-      const ddx    = mp.x - lastPx, ddy = mp.y - lastPy
-      const dl     = Math.hypot(ddx, ddy)
+      const ddx    = mp.x - lastPx, ddy = mp.y - lastPy, dl = Math.hypot(ddx, ddy)
       if (dist > 0.05) {
-        const offX = dl > 0 ? (-ddy / dl) * 14 : 0
-        const offY = dl > 0 ? ( ddx / dl) * 14 : 0
+        const offX = dl > 0 ? (-ddy / dl) * 14 : 0, offY = dl > 0 ? (ddx / dl) * 14 : 0
         items.push(<Text key="livelen"
-          x={(lastPx + mp.x) / 2 + offX - 24}
-          y={(lastPy + mp.y) / 2 + offY - 8}
-          text={`${dist.toFixed(2)}m`}
-          fontSize={11} fontStyle="bold"
-          fill={is90 ? '#06b6d4' : '#f59e0b'} listening={false} />)
+          x={(lastPx + mp.x) / 2 + offX - 24} y={(lastPy + mp.y) / 2 + offY - 8}
+          text={`${dist.toFixed(2)}m`} fontSize={11} fontStyle="bold"
+          fill={isStaircase ? '#fb923c' : (is90 ? '#06b6d4' : '#f59e0b')} listening={false} />)
       }
       if (drawingPoints.length >= 2) {
         const prev  = drawingPoints[drawingPoints.length - 2]
@@ -622,8 +719,7 @@ export default function FloorPlanView() {
         if (angle > 0.1) {
           items.push(<Text key="liveang"
             x={lastPx + 8} y={lastPy - 20}
-            text={(is90 ? '⊾ ' : '') + angle.toFixed(1) + '°'}
-            fontSize={11} fontStyle={is90 ? 'bold' : 'normal'}
+            text={(is90 ? '⊾ ' : '') + angle.toFixed(1) + '°'} fontSize={11} fontStyle={is90 ? 'bold' : 'normal'}
             fill={is90 ? '#06b6d4' : '#f0abfc'} listening={false} />)
         }
       }
@@ -632,39 +728,36 @@ export default function FloorPlanView() {
         const prevPx = PADDING + prev.x * SCALE, prevPy = PADDING + prev.y * SCALE
         const d1x = lastPx - prevPx, d1y = lastPy - prevPy, d1l = Math.hypot(d1x, d1y)
         if (d1l > 1 && dl > 1) {
-          const B  = RIGHT_ANGLE_BOX_SIZE_PX
-          const n1 = { x: d1x / d1l * B, y: d1y / d1l * B }
-          const n2 = { x: ddx / dl  * B, y: ddy / dl  * B }
+          const B = RIGHT_ANGLE_BOX_SIZE_PX
+          const n1 = { x: d1x / d1l * B, y: d1y / d1l * B }, n2 = { x: ddx / dl * B, y: ddy / dl * B }
           items.push(<Line key="rabox"
             points={[lastPx + n1.x, lastPy + n1.y, lastPx + n1.x + n2.x, lastPy + n1.y + n2.y, lastPx + n2.x, lastPy + n2.y]}
             stroke="#06b6d4" strokeWidth={1.5} closed={false} listening={false} />)
         }
       }
     }
-    if (snapped && mp) {
+
+    if (snapped && mp)
       items.push(<Circle key="snapdot" x={mp.x} y={mp.y} radius={4}
-        fill={is90 ? '#06b6d4' : '#f59e0b'} stroke="#fff" strokeWidth={1} listening={false} />)
-    }
+        fill={is90 ? '#06b6d4' : lineColor} stroke="#fff" strokeWidth={1} listening={false} />)
+
     return items
   }
 
-  // ── Placement ghost: show a translucent shape under cursor before placing ────
   const renderPlacementGhost = () => {
     if (!placingType || !snapResult.pos) return null
-    const mp  = snapResult.pos
-    const def = ELEMENT_DEFAULTS[placingType]
+    const mp = snapResult.pos, def = ELEMENT_DEFAULTS[placingType]
     if (!def) return null
     const ew = (def.width || 1) * SCALE, ed = (def.depth || 1) * SCALE
     const color = ELEMENT_COLORS[placingType] || '#94a3b8'
     return (
-      <Rect x={mp.x - ew / 2} y={mp.y - ed / 2}
-        width={ew} height={ed}
-        fill={`${color}40`} stroke={color} strokeWidth={1.5}
-        dash={[4, 3]} listening={false} />
+      <Rect x={mp.x - ew / 2} y={mp.y - ed / 2} width={ew} height={ed}
+        fill={`${color}40`} stroke={color} strokeWidth={1.5} dash={[4, 3]} listening={false} />
     )
   }
 
   const totalFloors = building.floors
+  const hasStaircases = staircases.length > 0
 
   return (
     <div ref={containerRef}
@@ -676,7 +769,7 @@ export default function FloorPlanView() {
         <span className="text-xs text-slate-500 font-medium mr-2 flex-shrink-0">Kondygnacja:</span>
         {Array.from({ length: totalFloors }, (_, i) => {
           const hasOwn = !!(floorOutlines[i]?.length >= 3)
-          const hasEls = elements.some((e) => e.floor === i && FLOOR_PLAN_ELEMENTS.has(e.type))
+          const hasEls = elements.some(e => e.floor === i && FLOOR_PLAN_ELEMENTS.has(e.type))
           return (
             <button key={i}
               onClick={() => { setSelectedFloor(i); setDrawingPoints([]); setSelectedElementId(null) }}
@@ -690,6 +783,11 @@ export default function FloorPlanView() {
           )
         })}
         <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+          {hasStaircases && (
+            <span className="text-xs text-orange-400 font-medium px-2 py-0.5 rounded-full bg-orange-900/30 border border-orange-800">
+              🪜 {staircases.length} kl. schodow{staircases.length === 1 ? 'a' : 'ych'} — widoczna na wszystkich piętrach
+            </span>
+          )}
           {currentOutline.length >= 3 && !isDrawing && (
             <button
               className="bg-red-900/70 hover:bg-red-700 text-red-300 text-xs px-2 py-1 rounded border border-red-800 transition-colors"
@@ -713,8 +811,9 @@ export default function FloorPlanView() {
             {renderDefaultRect()}
             {renderGhostOutlines()}
             {renderCurrentOutline()}
+            {renderStaircases()}
             {renderElements()}
-            {renderDrawing()}
+            {renderDrawingPreview()}
             {renderPlacementGhost()}
           </Layer>
         </Stage>
@@ -742,7 +841,7 @@ export default function FloorPlanView() {
           </div>
         )}
 
-        {/* Top-left floor label */}
+        {/* Floor label */}
         <div className="absolute top-3 left-3 pointer-events-none">
           <span className="bg-slate-800/80 text-slate-300 text-xs font-semibold px-3 py-1 rounded-full border border-slate-700">
             Rzut — {floorLabel(selectedFloor)}
@@ -753,40 +852,53 @@ export default function FloorPlanView() {
         <div className="absolute top-3 right-3 bg-slate-800/80 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-400 space-y-1 pointer-events-none">
           <div className="flex items-center gap-2"><span className="w-8 border border-dashed border-slate-500 inline-block" /><span>Obrys domyślny</span></div>
           <div className="flex items-center gap-2"><span className="w-8 border-2 border-blue-500 inline-block" /><span>Obrys kondygnacji</span></div>
-          <div className="flex items-center gap-2"><span className="w-8 border border-dashed border-slate-600 inline-block" /><span>Inne kondygnacje</span></div>
+          <div className="flex items-center gap-2"><span className="w-8 border-2 border-orange-500 inline-block" /><span>Klatka schodowa</span></div>
           <div className="flex items-center gap-2"><span className="text-cyan-400">⊾</span><span>Auto-snap 90°</span></div>
-          {!isDrawing && currentOutline.length >= 3 && (
-            <div className="text-blue-400 mt-1">Kliknij wymiar/kąt, aby edytować</div>
-          )}
-          {floorElements.length > 0 && (
-            <div className="text-yellow-400 mt-1">{floorElements.length} elementów — przeciągnij aby przenieść</div>
-          )}
+          {hasStaircases && <div className="text-orange-400">Klatki widoczne na wszystkich piętrach</div>}
         </div>
 
         {/* Bottom instruction bar */}
-        {isDrawing ? (
+        {isDrawingStaircase ? (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-orange-950/95 text-orange-100 text-sm px-5 py-2.5 rounded-full border border-orange-700 shadow-xl flex items-center gap-3">
+            <span className="text-lg">🪜</span>
+            <span>
+              {drawingPoints.length === 0
+                ? 'Kliknij, aby rozpocząć rysowanie obrysu klatki schodowej'
+                : `${drawingPoints.length} pkt · kliknij punkt startowy lub dblclick, aby zamknąć · Esc = anuluj`}
+            </span>
+            {drawingPoints.length > 0 && (
+              <button onClick={() => { setDrawingPoints([]); setActiveTool('select') }}
+                className="text-orange-300 hover:text-orange-100 font-medium">Anuluj</button>
+            )}
+          </div>
+        ) : isDrawingOutline ? (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-slate-800/95 text-white text-sm px-5 py-2.5 rounded-full border border-slate-600 shadow-xl flex items-center gap-3">
             <span>
               {drawingPoints.length === 0
-                ? `Kliknij, aby rozpocząć — ${floorLabel(selectedFloor)}`
-                : `${drawingPoints.length} pkt • kliknij start lub dblclick, aby zamknąć • Esc = anuluj`}
+                ? `Kliknij, aby rozpocząć obrys — ${floorLabel(selectedFloor)}`
+                : `${drawingPoints.length} pkt · kliknij start lub dblclick, aby zamknąć · Esc = anuluj`}
             </span>
             {drawingPoints.length > 0 && (
-              <button onClick={cancelDrawing} className="text-red-400 hover:text-red-300 font-medium">Anuluj</button>
+              <button onClick={() => { setDrawingPoints([]); setActiveTool('select') }}
+                className="text-red-400 hover:text-red-300 font-medium">Anuluj</button>
             )}
           </div>
         ) : placingType ? (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-slate-800/95 text-white text-sm px-5 py-2.5 rounded-full border border-slate-600 shadow-xl flex items-center gap-3">
-            <span>
-              {`Kliknij, aby umieścić: ${ELEMENT_NAMES[placingType] || placingType} — ${floorLabel(selectedFloor)}`}
-            </span>
+            <span>{`Kliknij, aby umieścić: ${ELEMENT_NAMES[placingType] || placingType} — ${floorLabel(selectedFloor)}`}</span>
             <button onClick={() => setActiveTool('select')} className="text-red-400 hover:text-red-300 font-medium">Anuluj</button>
           </div>
         ) : (
-          <button onClick={() => setActiveTool('draw-outline')}
-            className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-5 py-2 rounded-full shadow-xl transition-colors">
-            ✏️ Rysuj obrys — {floorLabel(selectedFloor)}
-          </button>
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2">
+            <button onClick={() => setActiveTool('draw-staircase')}
+              className="bg-orange-600 hover:bg-orange-500 text-white text-sm font-medium px-4 py-2 rounded-full shadow-xl transition-colors flex items-center gap-2">
+              <span>🪜</span><span>Rysuj klatkę schodową</span>
+            </button>
+            <button onClick={() => setActiveTool('draw-outline')}
+              className="bg-blue-700/80 hover:bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-full shadow-xl transition-colors">
+              ✏️ Obrys — {floorLabel(selectedFloor)}
+            </button>
+          </div>
         )}
       </div>
     </div>

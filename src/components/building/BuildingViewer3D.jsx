@@ -35,6 +35,164 @@ function resolveOutline(floorIndex, building) {
   return null
 }
 
+// ─── Staircase 3D mesh — extrudes the polygon through all floors ─────────────
+function StaircaseMesh({ sc, building, wallOpacity }) {
+  const outline = sc.outline
+  if (!outline || outline.length < 3) return null
+
+  const totalHeight = building.floors * building.floorHeight
+  const type   = sc.properties?.type || 'straight'
+  const spf    = sc.properties?.stepsPerFlight || 9
+  const fph    = sc.properties?.floorHeight || building.floorHeight
+  const transparent = wallOpacity < 0.99
+
+  const outlineKey = outline.map(p => `${p.x},${p.y}`).join('|')
+
+  // Outer shell shape
+  const shellShape = useMemo(
+    () => buildShape(outline, building.width, building.depth),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [outlineKey, building.width, building.depth]
+  )
+
+  const shellExtrude = useMemo(
+    () => ({ depth: totalHeight, bevelEnabled: false }),
+    [totalHeight]
+  )
+
+  if (!shellShape) return null
+
+  // Bounding box for stair placement inside the shaft
+  const xs = outline.map(p => p.x), ys = outline.map(p => p.y)
+  const minX = Math.min(...xs), maxX = Math.max(...xs)
+  const minY = Math.min(...ys), maxY = Math.max(...ys)
+  const cxWorld = (minX + maxX) / 2 - building.width / 2
+  const czWorld = (minY + maxY) / 2 - building.depth / 2
+  const bw = maxX - minX, bd = maxY - minY
+
+  // Build step meshes per floor
+  const stepMeshes = []
+  for (let f = 0; f < building.floors; f++) {
+    const baseY = f * building.floorHeight
+    const steps = spf
+    const stepH = (building.floorHeight - 0.05) / steps
+
+    if (type === 'straight') {
+      const stepD = (bd * 0.85) / steps
+      for (let s = 0; s < steps; s++) {
+        stepMeshes.push(
+          <mesh key={`${f}-s${s}`}
+            position={[cxWorld, baseY + stepH * s + stepH / 2, czWorld - bd * 0.4 + stepD * s + stepD / 2]}>
+            <boxGeometry args={[bw * 0.8, stepH, stepD]} />
+            <meshStandardMaterial color="#c2410c" />
+          </mesh>
+        )
+      }
+    } else if (type === 'l-shaped') {
+      const half = Math.ceil(steps / 2)
+      const stepD1 = (bd * 0.45) / half
+      const stepD2 = (bw * 0.45) / (steps - half)
+      for (let s = 0; s < half; s++) {
+        stepMeshes.push(
+          <mesh key={`${f}-s${s}`}
+            position={[cxWorld - bw * 0.2, baseY + stepH * s + stepH / 2, czWorld - bd * 0.4 + stepD1 * s + stepD1 / 2]}>
+            <boxGeometry args={[bw * 0.4, stepH, stepD1]} />
+            <meshStandardMaterial color="#c2410c" />
+          </mesh>
+        )
+      }
+      for (let s = 0; s < steps - half; s++) {
+        stepMeshes.push(
+          <mesh key={`${f}-s2${s}`}
+            position={[cxWorld - bw * 0.4 + stepD2 * s + stepD2 / 2, baseY + stepH * (half + s) + stepH / 2, czWorld + bd * 0.1]}>
+            <boxGeometry args={[stepD2, stepH, bd * 0.4]} />
+            <meshStandardMaterial color="#c2410c" />
+          </mesh>
+        )
+      }
+    } else if (type === 'u-shaped') {
+      const half = Math.ceil(steps / 2)
+      const stepD1 = (bd * 0.85) / half
+      for (let s = 0; s < half; s++) {
+        // Left flight going up
+        stepMeshes.push(
+          <mesh key={`${f}-sL${s}`}
+            position={[cxWorld - bw * 0.25, baseY + stepH * s + stepH / 2, czWorld - bd * 0.4 + stepD1 * s + stepD1 / 2]}>
+            <boxGeometry args={[bw * 0.35, stepH, stepD1]} />
+            <meshStandardMaterial color="#c2410c" />
+          </mesh>
+        )
+        // Right flight going down (reversed direction, starting from top)
+        stepMeshes.push(
+          <mesh key={`${f}-sR${s}`}
+            position={[cxWorld + bw * 0.25, baseY + stepH * (half - 1 - s) + stepH / 2, czWorld - bd * 0.4 + stepD1 * s + stepD1 / 2]}>
+            <boxGeometry args={[bw * 0.35, stepH, stepD1]} />
+            <meshStandardMaterial color="#e74c0c" />
+          </mesh>
+        )
+      }
+    } else if (type === 'spiral') {
+      const r = Math.min(bw, bd) * 0.35
+      const totalAngle = Math.PI * 2 * 1.1 // slightly more than full circle per floor
+      for (let s = 0; s < steps; s++) {
+        const a = (s / steps) * totalAngle - Math.PI / 2
+        const r1 = r * 0.2, r2 = r
+        const mx = cxWorld + Math.cos(a) * (r1 + r2) / 2
+        const mz = czWorld + Math.sin(a) * (r1 + r2) / 2
+        stepMeshes.push(
+          <mesh key={`${f}-sp${s}`} position={[mx, baseY + stepH * s + stepH / 2, mz]}
+            rotation={[0, -a, 0]}>
+            <boxGeometry args={[r2 - r1, stepH, 0.22]} />
+            <meshStandardMaterial color="#c2410c" />
+          </mesh>
+        )
+      }
+      // Central post
+      stepMeshes.push(
+        <mesh key={`${f}-post`} position={[cxWorld, baseY + building.floorHeight / 2, czWorld]}>
+          <cylinderGeometry args={[0.12, 0.12, building.floorHeight, 8]} />
+          <meshStandardMaterial color="#7c2d12" />
+        </mesh>
+      )
+    }
+
+    // Landing slab on top of each flight
+    if (shellShape) {
+      stepMeshes.push(
+        <group key={`${f}-landing`} position={[0, baseY + building.floorHeight - 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <mesh>
+            <extrudeGeometry args={[shellShape, { depth: 0.07, bevelEnabled: false }]} />
+            <meshStandardMaterial color="#fed7aa" transparent={transparent} opacity={Math.min(wallOpacity + 0.1, 1)} />
+          </mesh>
+        </group>
+      )
+    }
+  }
+
+  return (
+    <group renderOrder={2}>
+      {/* Shell walls — translucent */}
+      <group position={[0, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh renderOrder={2}>
+          <extrudeGeometry args={[shellShape, shellExtrude]} />
+          <meshStandardMaterial color="#fb923c"
+            transparent opacity={Math.max(0.12, wallOpacity - 0.35)}
+            side={THREE.DoubleSide} depthWrite={false} />
+        </mesh>
+      </group>
+      {/* Steps */}
+      {stepMeshes}
+      {/* Outline wire on each floor */}
+      <group position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh renderOrder={3}>
+          <extrudeGeometry args={[shellShape, { depth: 0.04, bevelEnabled: false }]} />
+          <meshStandardMaterial color="#fb923c" transparent opacity={0.6} side={THREE.DoubleSide} />
+        </mesh>
+      </group>
+    </group>
+  )
+}
+
 // ─── Single floor mesh — uses extruded shape or box ──────────────────────────
 function FloorMesh({ floorIndex, building, wallOpacity }) {
   const transparent = wallOpacity < 0.99
@@ -313,10 +471,9 @@ function ElementMeshes({ elements, building }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function BuildingViewer3D() {
-  const { building, elements, wallOpacity, setWallOpacity } = useBuildingStore()
+  const { building, elements, staircases, wallOpacity, setWallOpacity } = useBuildingStore()
   const totalHeight = building.floors * building.floorHeight
 
-  // Count how many floors have a custom per-floor outline
   const floorOutlines = building.floorOutlines || {}
   const customFloorCount = Object.values(floorOutlines).filter((o) => o?.length >= 3).length
   const hasGlobalOutline = building.outline?.length >= 3
@@ -378,6 +535,11 @@ export default function BuildingViewer3D() {
               building={building}
               wallOpacity={wallOpacity}
             />
+          ))}
+
+          {/* Render staircases through all floors */}
+          {(staircases || []).map(sc => (
+            <StaircaseMesh key={sc.id} sc={sc} building={building} wallOpacity={wallOpacity} />
           ))}
 
           <ElementMeshes elements={elements} building={building} />

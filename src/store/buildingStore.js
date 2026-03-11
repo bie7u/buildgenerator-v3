@@ -11,7 +11,10 @@ const useBuildingStore = create((set) => ({
     floorOutlines: {}, // per-floor overrides: { [floorIndex]: [{x, y}] }
   },
   elements: [],
+  // Staircases: polygon-outlined, span all floors, configurable stair type
+  staircases: [],
   selectedElementId: null,
+  selectedStaircaseId: null,
   activeTool: 'select',
   viewMode: '2d',
   wizardOpen: false,
@@ -30,7 +33,7 @@ const useBuildingStore = create((set) => ({
     set((state) => ({
       elements: state.elements.map((e) => (e.id === id ? { ...e, ...updates } : e)),
     })),
-  setSelectedElementId: (id) => set({ selectedElementId: id }),
+  setSelectedElementId: (id) => set({ selectedElementId: id, selectedStaircaseId: null }),
   setActiveTool: (tool) => set({ activeTool: tool }),
   setViewMode: (mode) => set({ viewMode: mode }),
   setWizardOpen: (open) => set({ wizardOpen: open }),
@@ -55,6 +58,20 @@ const useBuildingStore = create((set) => ({
       const { [floorIndex]: _removed, ...rest } = state.building.floorOutlines || {}
       return { building: { ...state.building, floorOutlines: rest } }
     }),
+
+  // ── Staircase CRUD ────────────────────────────────────────────────────────────
+  addStaircase: (sc) =>
+    set((state) => ({
+      staircases: [...state.staircases, { ...sc, id: crypto.randomUUID() }],
+    })),
+  removeStaircase: (id) =>
+    set((state) => ({ staircases: state.staircases.filter((s) => s.id !== id) })),
+  updateStaircase: (id, updates) =>
+    set((state) => ({
+      staircases: state.staircases.map((s) => (s.id === id ? { ...s, ...updates } : s)),
+    })),
+  setSelectedStaircaseId: (id) => set({ selectedStaircaseId: id, selectedElementId: null }),
 }))
 
 export default useBuildingStore
+

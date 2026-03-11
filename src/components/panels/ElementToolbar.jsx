@@ -16,10 +16,10 @@ const tools = [
   },
   { divider: true },
   {
-    id: 'add-staircase',
+    id: 'draw-staircase',
     label: 'Klatka',
     icon: '🪜',
-    description: 'Klatka schodowa – schody przez wszystkie piętra',
+    description: 'Narysuj klatkę schodową (przez wszystkie kondygnacje)',
   },
   {
     id: 'add-elevator',
@@ -78,14 +78,8 @@ export default function ElementToolbar() {
 
   const handleToolClick = (toolId) => {
     setActiveTool(toolId)
-    if (toolId === 'draw-outline') {
-      setViewMode('plan')
-    }
-    // Placement tools: switch to floor plan view for interior elements
-    if (
-      ['add-staircase', 'add-elevator', 'add-door', 'add-entrance',
-       'add-column', 'add-wall', 'add-arc-wall'].includes(toolId)
-    ) {
+    // All drawing/placement tools switch to Rzut view
+    if (toolId !== 'select' && toolId !== 'add-window' && toolId !== 'add-balcony') {
       setViewMode('plan')
     }
   }
