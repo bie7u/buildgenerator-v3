@@ -22,6 +22,18 @@ const tools = [
     description: 'Narysuj klatkę schodową (przez wszystkie kondygnacje)',
   },
   {
+    id: 'add-stairs',
+    label: 'Schody',
+    icon: '🔢',
+    description: 'Umieść bieg schodowy na kondygnacji',
+  },
+  {
+    id: 'add-landing',
+    label: 'Podest',
+    icon: '⬛',
+    description: 'Umieść spocznik / podest schodowy',
+  },
+  {
     id: 'add-elevator',
     label: 'Winda',
     icon: '🛗',

@@ -13,7 +13,7 @@ const RIGHT_ANGLE_BOX_SIZE_PX  = 14
 
 // Which elements live on the floor plan (not staircase — handled separately)
 const FLOOR_PLAN_ELEMENTS = new Set([
-  'elevator', 'door', 'entrance', 'column', 'wall', 'arc-wall',
+  'elevator', 'door', 'entrance', 'column', 'wall', 'arc-wall', 'stairs', 'landing',
 ])
 
 // ─── Geometry helpers ─────────────────────────────────────────────────────────
@@ -334,6 +334,40 @@ function ElementShape({ el, scale, padding, isSelected, onSelect, onDragEnd }) {
       <Group {...commonProps} x={ex} y={ey} rotation={el.properties?.rotation ?? 0}>
         <Rect width={ew} height={Math.max((el.depth || 0.15) * scale, 4)} fill={color} opacity={0.9}
           stroke={strokeColor} strokeWidth={strokeWidth} />
+      </Group>
+    )
+  }
+
+  if (el.type === 'stairs') {
+    const nSteps = Math.max(3, Math.min(el.properties?.steps || 9, 20))
+    const rot = el.properties?.rotation ?? 0
+    const stepLines = []
+    for (let i = 1; i < nSteps; i++) {
+      const sy = ed * (i / nSteps)
+      stepLines.push(<Line key={`s${i}`} points={[2, sy, ew - 2, sy]}
+        stroke={`${color}bb`} strokeWidth={0.8} listening={false} />)
+    }
+    return (
+      <Group {...commonProps} x={ex} y={ey} rotation={rot}>
+        <Rect width={ew} height={ed} fill={`${color}30`} stroke={color} strokeWidth={strokeWidth} />
+        {stepLines}
+        <Line points={[ew / 2, ed * 0.8, ew / 2, ed * 0.15]}
+          stroke="rgba(255,255,255,0.8)" strokeWidth={1.5} listening={false} />
+        <Line points={[ew / 2 - 5, ed * 0.3, ew / 2, ed * 0.15, ew / 2 + 5, ed * 0.3]}
+          stroke="rgba(255,255,255,0.8)" strokeWidth={1.5} listening={false} />
+        {isSelected && <Rect width={ew} height={ed} stroke="#fff" strokeWidth={1} dash={[4, 3]} fill="transparent" />}
+      </Group>
+    )
+  }
+
+  if (el.type === 'landing') {
+    const rot = el.properties?.rotation ?? 0
+    return (
+      <Group {...commonProps} x={ex} y={ey} rotation={rot}>
+        <Rect width={ew} height={ed} fill={`${color}50`} stroke={color} strokeWidth={strokeWidth} />
+        <Line points={[0, 0, ew, ed]} stroke={`${color}90`} strokeWidth={0.8} listening={false} />
+        <Line points={[0, ed, ew, 0]} stroke={`${color}90`} strokeWidth={0.8} listening={false} />
+        {isSelected && <Rect width={ew} height={ed} stroke="#fff" strokeWidth={1} dash={[4, 3]} fill="transparent" />}
       </Group>
     )
   }

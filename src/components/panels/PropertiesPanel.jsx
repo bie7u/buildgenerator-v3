@@ -412,6 +412,39 @@ export default function PropertiesPanel() {
             </div>
           )}
 
+          {element.type === 'stairs' && (
+            <div className="space-y-2">
+              <div className="text-xs text-slate-500 mb-1 font-medium uppercase tracking-wide">Właściwości schodów</div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Liczba stopni</label>
+                <input type="number" min="3" max="20"
+                  className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-white"
+                  value={form.steps ?? 9}
+                  onChange={e => handleChange('steps', e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Obrót na planie (°)</label>
+                <input type="number" min="0" max="359"
+                  className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-white"
+                  value={form.rotation ?? 0}
+                  onChange={e => handleChange('rotation', e.target.value)} />
+              </div>
+            </div>
+          )}
+
+          {element.type === 'landing' && (
+            <div className="space-y-2">
+              <div className="text-xs text-slate-500 mb-1 font-medium uppercase tracking-wide">Właściwości podestu</div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Obrót na planie (°)</label>
+                <input type="number" min="0" max="359"
+                  className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-white"
+                  value={form.rotation ?? 0}
+                  onChange={e => handleChange('rotation', e.target.value)} />
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-2 mt-4">
             <button onClick={handleSave}
               className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm py-1.5 rounded transition-colors">

@@ -6,6 +6,8 @@ export const pxToMeters = (px) => px / SCALE
 
 export const ELEMENT_COLORS = {
   staircase: '#f97316',
+  stairs: '#f59e0b',
+  landing: '#d97706',
   elevator: '#3b82f6',
   window: '#bae6fd',
   balcony: '#22c55e',
@@ -18,6 +20,8 @@ export const ELEMENT_COLORS = {
 
 export const ELEMENT_NAMES = {
   staircase: 'Klatka schodowa',
+  stairs: 'Schody',
+  landing: 'Podest',
   elevator: 'Winda',
   window: 'Okno',
   balcony: 'Balkon',
@@ -30,6 +34,8 @@ export const ELEMENT_NAMES = {
 
 export const ELEMENT_DEFAULTS = {
   staircase: { width: 3, height: 4, depth: 3, properties: { steps: 18, hasLanding: true } },
+  stairs: { width: 1.2, height: 2.5, depth: 2.5, properties: { steps: 9, rotation: 0 } },
+  landing: { width: 1.5, height: 0.15, depth: 1.5, properties: { rotation: 0 } },
   elevator: { width: 1.5, height: 2, depth: 1.5, properties: { capacity: 4 } },
   window: { width: 1.2, height: 0.3, depth: 0.1, properties: { style: 'standard', glazing: 'double' } },
   balcony: { width: 3, height: 0.2, depth: 1.2, properties: { railing: 'glass' } },
