@@ -126,7 +126,9 @@ function ElementMeshes({ elements, building }) {
   return (
     <>
       {elements.map((el) => {
+        // x: width direction (centered), z: depth direction (centered), y: height up
         const xOffset = el.x - building.width / 2 + (el.width || 1) / 2
+        const zOffset = (el.y ?? 0) - building.depth / 2 + (el.depth || 1) / 2
         const baseY = el.floor * building.floorHeight
         let color = '#94a3b8'
         let yPos = baseY + (el.height || 1) / 2
@@ -144,14 +146,14 @@ function ElementMeshes({ elements, building }) {
                 {Array.from({ length: steps }).map((_, s) => (
                   <mesh
                     key={s}
-                    position={[xOffset, baseY + stepH * s + stepH / 2, -sd / 2 + stepD * s + stepD / 2]}
+                    position={[xOffset, baseY + stepH * s + stepH / 2, zOffset - sd / 2 + stepD * s + stepD / 2]}
                     renderOrder={1}
                   >
                     <boxGeometry args={[sw, stepH, stepD]} />
                     <meshStandardMaterial color="#f97316" />
                   </mesh>
                 ))}
-                <mesh position={[xOffset, baseY + building.floorHeight - 0.05, 0]} renderOrder={1}>
+                <mesh position={[xOffset, baseY + building.floorHeight - 0.05, zOffset]} renderOrder={1}>
                   <boxGeometry args={[sw, 0.1, sd]} />
                   <meshStandardMaterial color="#ea580c" />
                 </mesh>
@@ -164,17 +166,99 @@ function ElementMeshes({ elements, building }) {
             const ed = el.depth || 1.5
             return (
               <group key={el.id} renderOrder={1}>
-                <mesh position={[xOffset, baseY + eh / 2, 0]} renderOrder={1}>
+                <mesh position={[xOffset, baseY + eh / 2, zOffset]} renderOrder={1}>
                   <boxGeometry args={[ew, eh, ed]} />
                   <meshStandardMaterial color="#1d4ed8" transparent opacity={0.35} side={THREE.DoubleSide} depthWrite={false} />
                 </mesh>
-                <mesh position={[xOffset, baseY + eh * 0.3, 0]} renderOrder={2}>
+                <mesh position={[xOffset, baseY + eh * 0.3, zOffset]} renderOrder={2}>
                   <boxGeometry args={[ew * 0.8, eh * 0.4, ed * 0.8]} />
                   <meshStandardMaterial color="#3b82f6" />
                 </mesh>
-                <mesh position={[xOffset, baseY + eh * 0.3, ed / 2 + 0.01]} renderOrder={2}>
+                <mesh position={[xOffset, baseY + eh * 0.3, zOffset + ed / 2 + 0.01]} renderOrder={2}>
                   <boxGeometry args={[ew * 0.6, eh * 0.35, 0.04]} />
                   <meshStandardMaterial color="#93c5fd" />
+                </mesh>
+              </group>
+            )
+          }
+          case 'door': {
+            const dw  = el.width  || 0.9
+            const dh  = el.height || 2.1
+            const dt  = el.depth  || 0.1
+            const rot = ((el.properties?.rotation ?? 0) * Math.PI) / 180
+            return (
+              <group key={el.id} renderOrder={1} position={[xOffset, baseY, zOffset]} rotation={[0, rot, 0]}>
+                {/* Frame top */}
+                <mesh position={[0, dh + 0.05, 0]} renderOrder={1}>
+                  <boxGeometry args={[dw + 0.1, 0.1, dt + 0.05]} />
+                  <meshStandardMaterial color="#a78bfa" />
+                </mesh>
+                {/* Frame left */}
+                <mesh position={[-(dw / 2 + 0.05), dh / 2, 0]} renderOrder={1}>
+                  <boxGeometry args={[0.1, dh, dt + 0.05]} />
+                  <meshStandardMaterial color="#a78bfa" />
+                </mesh>
+                {/* Frame right */}
+                <mesh position={[dw / 2 + 0.05, dh / 2, 0]} renderOrder={1}>
+                  <boxGeometry args={[0.1, dh, dt + 0.05]} />
+                  <meshStandardMaterial color="#a78bfa" />
+                </mesh>
+                {/* Door leaf */}
+                <mesh position={[-dw / 2 + dw / 4, dh / 2, dt / 2]} renderOrder={2}>
+                  <boxGeometry args={[dw / 2, dh - 0.05, 0.04]} />
+                  <meshStandardMaterial color="#c4b5fd" transparent opacity={0.7} side={THREE.DoubleSide} depthWrite={false} />
+                </mesh>
+              </group>
+            )
+          }
+          case 'entrance': {
+            const ew  = el.width  || 1.8
+            const eh  = el.height || 2.2
+            const et  = el.depth  || 0.15
+            const rot = ((el.properties?.rotation ?? 0) * Math.PI) / 180
+            return (
+              <group key={el.id} renderOrder={1} position={[xOffset, baseY, zOffset]} rotation={[0, rot, 0]}>
+                {/* Top beam */}
+                <mesh position={[0, eh + 0.08, 0]} renderOrder={1}>
+                  <boxGeometry args={[ew + 0.15, 0.15, et + 0.05]} />
+                  <meshStandardMaterial color="#34d399" />
+                </mesh>
+                {/* Left pillar */}
+                <mesh position={[-(ew / 2 + 0.075), eh / 2, 0]} renderOrder={1}>
+                  <boxGeometry args={[0.15, eh, et + 0.05]} />
+                  <meshStandardMaterial color="#34d399" />
+                </mesh>
+                {/* Right pillar */}
+                <mesh position={[ew / 2 + 0.075, eh / 2, 0]} renderOrder={1}>
+                  <boxGeometry args={[0.15, eh, et + 0.05]} />
+                  <meshStandardMaterial color="#34d399" />
+                </mesh>
+                {/* Double door leaves */}
+                <mesh position={[-ew / 4, eh / 2, et / 2]} renderOrder={2}>
+                  <boxGeometry args={[ew / 2 - 0.04, eh - 0.05, 0.04]} />
+                  <meshStandardMaterial color="#6ee7b7" transparent opacity={0.6} side={THREE.DoubleSide} depthWrite={false} />
+                </mesh>
+                <mesh position={[ew / 4, eh / 2, et / 2]} renderOrder={2}>
+                  <boxGeometry args={[ew / 2 - 0.04, eh - 0.05, 0.04]} />
+                  <meshStandardMaterial color="#6ee7b7" transparent opacity={0.6} side={THREE.DoubleSide} depthWrite={false} />
+                </mesh>
+              </group>
+            )
+          }
+          case 'arc-wall': {
+            const radius    = el.properties?.radius    ?? 2
+            const startAngle = el.properties?.startAngle ?? 0
+            const endAngle   = el.properties?.endAngle   ?? 90
+            const thickness  = el.properties?.thickness  ?? 0.15
+            const arcAngle   = Math.abs((endAngle - startAngle) * Math.PI / 180)
+            const wallH      = el.height || 2.4
+            return (
+              <group key={el.id} renderOrder={1}
+                position={[xOffset, baseY + wallH / 2, zOffset]}
+                rotation={[0, -(startAngle * Math.PI / 180), 0]}>
+                <mesh renderOrder={1}>
+                  <torusGeometry args={[radius, thickness / 2, 4, 24, arcAngle]} />
+                  <meshStandardMaterial color="#fb923c" side={THREE.DoubleSide} />
                 </mesh>
               </group>
             )
@@ -184,7 +268,7 @@ function ElementMeshes({ elements, building }) {
             geom = [el.width || 1.2, el.height || 1.2, 0.05]
             yPos = baseY + building.floorHeight * 0.6
             return (
-              <mesh key={el.id} position={[xOffset, yPos, building.depth / 2 + 0.05]} renderOrder={1}>
+              <mesh key={el.id} position={[xOffset, yPos, zOffset + building.depth / 2 + 0.05]} renderOrder={1}>
                 <boxGeometry args={geom} />
                 <meshStandardMaterial color={color} transparent opacity={0.7} />
               </mesh>
@@ -194,7 +278,7 @@ function ElementMeshes({ elements, building }) {
             geom = [el.width || 3, 0.15, el.depth || 1.2]
             yPos = baseY + 0.15 / 2
             return (
-              <mesh key={el.id} position={[xOffset, yPos, building.depth / 2 + (el.depth || 1.2) / 2]} renderOrder={1}>
+              <mesh key={el.id} position={[xOffset, yPos, zOffset + building.depth / 2 + (el.depth || 1.2) / 2]} renderOrder={1}>
                 <boxGeometry args={geom} />
                 <meshStandardMaterial color={color} />
               </mesh>
@@ -202,7 +286,7 @@ function ElementMeshes({ elements, building }) {
           case 'column':
             color = '#374151'
             return (
-              <mesh key={el.id} position={[xOffset, baseY + building.floorHeight / 2, 0]} renderOrder={1}>
+              <mesh key={el.id} position={[xOffset, baseY + building.floorHeight / 2, zOffset]} renderOrder={1}>
                 <cylinderGeometry args={[0.2, 0.2, building.floorHeight, 8]} />
                 <meshStandardMaterial color={color} />
               </mesh>
@@ -217,7 +301,7 @@ function ElementMeshes({ elements, building }) {
         }
 
         return (
-          <mesh key={el.id} position={[xOffset, yPos, 0]} renderOrder={1}>
+          <mesh key={el.id} position={[xOffset, yPos, zOffset]} renderOrder={1}>
             <boxGeometry args={geom} />
             <meshStandardMaterial color={color} />
           </mesh>

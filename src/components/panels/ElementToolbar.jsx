@@ -28,6 +28,19 @@ const tools = [
     description: 'Winda osobowa w obrębie klatki',
   },
   {
+    id: 'add-door',
+    label: 'Drzwi',
+    icon: '🚪',
+    description: 'Drzwi wewnętrzne lub wejściowe',
+  },
+  {
+    id: 'add-entrance',
+    label: 'Wejście',
+    icon: '🏛️',
+    description: 'Główne wejście do budynku',
+  },
+  { divider: true },
+  {
     id: 'add-window',
     label: 'Okno',
     icon: '🪟',
@@ -39,6 +52,7 @@ const tools = [
     icon: '🏠',
     description: 'Balkon przy danym piętrze',
   },
+  { divider: true },
   {
     id: 'add-column',
     label: 'Kolumna',
@@ -51,6 +65,12 @@ const tools = [
     icon: '▬',
     description: 'Ścianka działowa lub przegroda',
   },
+  {
+    id: 'add-arc-wall',
+    label: 'Łuk',
+    icon: '◜',
+    description: 'Ściana łukowa / zaokrąglona',
+  },
 ]
 
 export default function ElementToolbar() {
@@ -59,6 +79,13 @@ export default function ElementToolbar() {
   const handleToolClick = (toolId) => {
     setActiveTool(toolId)
     if (toolId === 'draw-outline') {
+      setViewMode('plan')
+    }
+    // Placement tools: switch to floor plan view for interior elements
+    if (
+      ['add-staircase', 'add-elevator', 'add-door', 'add-entrance',
+       'add-column', 'add-wall', 'add-arc-wall'].includes(toolId)
+    ) {
       setViewMode('plan')
     }
   }
